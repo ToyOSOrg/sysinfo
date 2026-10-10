@@ -1,7 +1,6 @@
 // Take a look at the license at the top of the repository in the LICENSE file.
 
 use crate::toyos::cpu::{CpuInner, vendor_id_and_brand};
-use crate::utils::os_release_value;
 use crate::{
     Cpu, CpuRefreshKind, LoadAvg, MemoryRefreshKind, Pid, Process, ProcessRefreshKind,
     ProcessesToUpdate,
@@ -23,17 +22,16 @@ pub const SUPPORTED_SIGNALS: &[crate::Signal] = supported_signals();
 #[doc = include_str!("../../md_doc/minimum_cpu_update_interval.md")]
 pub const MINIMUM_CPU_UPDATE_INTERVAL: Duration = Duration::from_millis(0);
 
-/// Which build the running system is, in the os-release(5) format.
-const OS_RELEASE: &str = "/system/etc/os-release";
-
 /// The machine-wide facts every process may read; `None` if the kernel refused them.
 fn header() -> Option<SysinfoHeader> {
     let mut buf = [0; SYSINFO_HEADER_SIZE];
     (::toyos::system::sysinfo(&mut buf) == SYSINFO_HEADER_SIZE).then(|| SysinfoHeader::decode(&buf))
 }
 
-fn os_release(key: &str) -> Option<String> {
-    os_release_value(&std::fs::read_to_string(OS_RELEASE).ok()?, key)
+/// Which build the running system is; `None` if its os-release(5) file is
+/// not one the build wrote.
+fn release() -> Option<toyos_osrelease::Release> {
+    toyos_osrelease::parse(&std::fs::read(toyos_osrelease::GUEST_PATH).ok()?).ok()
 }
 
 pub(crate) struct SystemInner {
@@ -163,30 +161,28 @@ impl SystemInner {
     }
 
     pub(crate) fn name() -> Option<String> {
-        os_release("NAME")
+        Some(toyos_osrelease::NAME.to_owned())
     }
 
     pub(crate) fn long_os_version() -> Option<String> {
-        os_release("PRETTY_NAME")
+        release().map(|r| r.pretty_name().to_string())
     }
 
-    // The kernel is part of the build os-release names.
+    // The kernel is part of the build os-release names; this is `uname -r`.
     pub(crate) fn kernel_version() -> Option<String> {
-        os_release("VERSION_ID")
+        release().map(|r| r.uname_release().to_string())
     }
 
     pub(crate) fn os_version() -> Option<String> {
-        os_release("VERSION_ID")
+        release().map(|r| r.short().to_owned())
     }
 
     pub(crate) fn distribution_id() -> String {
-        os_release("ID").unwrap_or_else(|| std::env::consts::OS.to_owned())
+        toyos_osrelease::ID.to_owned()
     }
 
     pub(crate) fn distribution_id_like() -> Vec<String> {
-        os_release("ID_LIKE")
-            .map(|like| like.split_ascii_whitespace().map(String::from).collect())
-            .unwrap_or_default()
+        Vec::new()
     }
 
     pub(crate) fn kernel_name() -> Option<&'static str> {

@@ -112,22 +112,9 @@ fn cpuid_text(registers: &[u32]) -> Option<String> {
     String::from_utf8(bytes).ok()
 }
 
-/// The value `key` is assigned in the os-release(5) file `text`, without its quotes.
-#[cfg(any(test, all(target_os = "toyos", not(feature = "unknown-ci"))))]
-pub(crate) fn os_release_value(text: &str, key: &str) -> Option<String> {
-    let value = text
-        .lines()
-        .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))?;
-    let unquoted = ['"', '\'']
-        .iter()
-        .find_map(|&q| value.strip_prefix(q)?.strip_suffix(q))
-        .unwrap_or(value);
-    Some(unquoted.to_owned())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{cpuid_text, os_release_value};
+    use super::cpuid_text;
 
     #[test]
     fn cpuid_text_reads_registers_in_order_up_to_nul() {
@@ -143,23 +130,5 @@ mod tests {
         );
         assert_eq!(cpuid_text(&[0]).as_deref(), Some(""));
         assert_eq!(cpuid_text(&[0x0000_00ff]), None);
-    }
-
-    #[test]
-    fn os_release_value_unquotes_the_named_key_only() {
-        let text =
-            "NAME=\"ToyOS\"\nID=toyos\nVERSION_ID='1a2b'\nPRETTY_NAME=\"ToyOS 1a2b (dirty)\"\n";
-        assert_eq!(os_release_value(text, "NAME").as_deref(), Some("ToyOS"));
-        assert_eq!(os_release_value(text, "ID").as_deref(), Some("toyos"));
-        assert_eq!(
-            os_release_value(text, "VERSION_ID").as_deref(),
-            Some("1a2b")
-        );
-        assert_eq!(
-            os_release_value(text, "PRETTY_NAME").as_deref(),
-            Some("ToyOS 1a2b (dirty)")
-        );
-        assert_eq!(os_release_value(text, "ID_LIKE"), None);
-        assert_eq!(os_release_value(text, "NAM"), None);
     }
 }
