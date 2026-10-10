@@ -60,3 +60,106 @@ cfg_select! {
         // }
     }
 }
+
+/// The CPU's vendor id (`cpuid` leaf `0`) and brand string (leaves `0x8000_0002..=0x8000_0004`).
+///
+/// The brand is empty on a CPU without the extended leaves, and the vendor id is `None` when its
+/// bytes are not UTF-8.
+#[cfg(all(
+    feature = "system",
+    not(feature = "unknown-ci"),
+    any(windows, target_os = "toyos"),
+    any(target_arch = "x86", target_arch = "x86_64"),
+))]
+pub(crate) fn cpuid_vendor_id_and_brand() -> (Option<String>, String) {
+    #[cfg(target_arch = "x86")]
+    use std::arch::x86::__cpuid;
+    #[cfg(target_arch = "x86_64")]
+    use std::arch::x86_64::__cpuid;
+
+    let brand = if __cpuid(0x8000_0000).eax >= 0x8000_0004 {
+        let registers: Vec<u32> = (0x8000_0002..=0x8000_0004)
+            .flat_map(|leaf| {
+                let r = __cpuid(leaf);
+                [r.eax, r.ebx, r.ecx, r.edx]
+            })
+            .collect();
+        cpuid_text(&registers).unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let r = __cpuid(0);
+    (cpuid_text(&[r.ebx, r.edx, r.ecx]), brand)
+}
+
+/// The text `registers` spell, each register's bytes in little-endian order, up to the first NUL;
+/// `None` if that is not UTF-8.
+#[cfg(any(
+    test,
+    all(
+        feature = "system",
+        not(feature = "unknown-ci"),
+        any(windows, target_os = "toyos"),
+        any(target_arch = "x86", target_arch = "x86_64"),
+    )
+))]
+fn cpuid_text(registers: &[u32]) -> Option<String> {
+    let bytes = registers
+        .iter()
+        .flat_map(|r| r.to_le_bytes())
+        .take_while(|&b| b != 0)
+        .collect();
+    String::from_utf8(bytes).ok()
+}
+
+/// The value `key` is assigned in the os-release(5) file `text`, without its quotes.
+#[cfg(any(test, all(target_os = "toyos", not(feature = "unknown-ci"))))]
+pub(crate) fn os_release_value(text: &str, key: &str) -> Option<String> {
+    let value = text
+        .lines()
+        .find_map(|line| line.strip_prefix(key)?.strip_prefix('='))?;
+    let unquoted = ['"', '\'']
+        .iter()
+        .find_map(|&q| value.strip_prefix(q)?.strip_suffix(q))
+        .unwrap_or(value);
+    Some(unquoted.to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{cpuid_text, os_release_value};
+
+    #[test]
+    fn cpuid_text_reads_registers_in_order_up_to_nul() {
+        // "GenuineIntel" as leaf 0 returns it: ebx, edx, ecx.
+        assert_eq!(
+            cpuid_text(&[0x756e_6547, 0x4965_6e69, 0x6c65_746e]).as_deref(),
+            Some("GenuineIntel")
+        );
+        // A brand string padded with NULs stops at the first one.
+        assert_eq!(
+            cpuid_text(&[0x2055_5043, 0x0000_3121, 0x6464_6464]).as_deref(),
+            Some("CPU !1")
+        );
+        assert_eq!(cpuid_text(&[0]).as_deref(), Some(""));
+        assert_eq!(cpuid_text(&[0x0000_00ff]), None);
+    }
+
+    #[test]
+    fn os_release_value_unquotes_the_named_key_only() {
+        let text =
+            "NAME=\"ToyOS\"\nID=toyos\nVERSION_ID='1a2b'\nPRETTY_NAME=\"ToyOS 1a2b (dirty)\"\n";
+        assert_eq!(os_release_value(text, "NAME").as_deref(), Some("ToyOS"));
+        assert_eq!(os_release_value(text, "ID").as_deref(), Some("toyos"));
+        assert_eq!(
+            os_release_value(text, "VERSION_ID").as_deref(),
+            Some("1a2b")
+        );
+        assert_eq!(
+            os_release_value(text, "PRETTY_NAME").as_deref(),
+            Some("ToyOS 1a2b (dirty)")
+        );
+        assert_eq!(os_release_value(text, "ID_LIKE"), None);
+        assert_eq!(os_release_value(text, "NAM"), None);
+    }
+}

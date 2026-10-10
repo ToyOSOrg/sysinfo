@@ -403,74 +403,11 @@ fn get_vendor_id_not_great(info: &SYSTEM_INFO) -> String {
 
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub(crate) fn get_vendor_id_and_brand(info: &SYSTEM_INFO) -> (String, String) {
-    #[cfg(target_arch = "x86")]
-    use std::arch::x86::__cpuid;
-    #[cfg(target_arch = "x86_64")]
-    use std::arch::x86_64::__cpuid;
-
-    unsafe fn add_u32(v: &mut Vec<u8>, i: u32) {
-        let i = &i as *const u32 as *const u8;
-        unsafe {
-            v.push(*i);
-            v.push(*i.offset(1));
-            v.push(*i.offset(2));
-            v.push(*i.offset(3));
-        }
-    }
-
-    unsafe {
-        // First, we try to get the complete name.
-        let res = __cpuid(0x80000000);
-        let n_ex_ids = res.eax;
-        let brand = if n_ex_ids >= 0x80000004 {
-            let mut extdata = Vec::with_capacity(5);
-
-            for i in 0x80000000..=n_ex_ids {
-                extdata.push(__cpuid(i));
-            }
-
-            // 4 * u32 * nb_entries
-            let mut out = Vec::with_capacity(4 * std::mem::size_of::<u32>() * 3);
-            for data in extdata.iter().take(5).skip(2) {
-                add_u32(&mut out, data.eax);
-                add_u32(&mut out, data.ebx);
-                add_u32(&mut out, data.ecx);
-                add_u32(&mut out, data.edx);
-            }
-            let mut pos = 0;
-            for e in out.iter() {
-                if *e == 0 {
-                    break;
-                }
-                pos += 1;
-            }
-            match std::str::from_utf8(&out[..pos]) {
-                Ok(s) => s.to_owned(),
-                _ => String::new(),
-            }
-        } else {
-            String::new()
-        };
-
-        // Failed to get full name, let's retry for the short version!
-        let res = __cpuid(0);
-        let mut x = Vec::with_capacity(3 * std::mem::size_of::<u32>());
-        add_u32(&mut x, res.ebx);
-        add_u32(&mut x, res.edx);
-        add_u32(&mut x, res.ecx);
-        let mut pos = 0;
-        for e in x.iter() {
-            if *e == 0 {
-                break;
-            }
-            pos += 1;
-        }
-        let vendor_id = match std::str::from_utf8(&x[..pos]) {
-            Ok(s) => s.to_owned(),
-            Err(_) => get_vendor_id_not_great(info),
-        };
-        (vendor_id, brand)
-    }
+    let (vendor_id, brand) = crate::utils::cpuid_vendor_id_and_brand();
+    (
+        vendor_id.unwrap_or_else(|| get_vendor_id_not_great(info)),
+        brand,
+    )
 }
 
 #[cfg(all(not(target_arch = "x86_64"), not(target_arch = "x86")))]

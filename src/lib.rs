@@ -62,6 +62,13 @@ cfg_select! {
         #[cfg(test)]
         pub(crate) const MIN_USERS: usize = 1;
     }
+    target_os = "toyos" => {
+        mod toyos;
+        use crate::toyos as sys;
+
+        #[cfg(test)]
+        pub(crate) const MIN_USERS: usize = 0;
+    }
     _ => {
         mod unknown;
         use crate::unknown as sys;
@@ -125,6 +132,8 @@ pub(crate) mod utils;
 // Make formattable by rustfmt.
 #[cfg(any())]
 mod network;
+#[cfg(any())]
+mod toyos;
 #[cfg(any())]
 mod unix;
 #[cfg(any())]
